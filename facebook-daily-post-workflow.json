@@ -19,32 +19,39 @@
       }
     },
     {
-      "id": "openai-generate-1",
+      "id": "ollama-generate-1",
       "name": "Generate Post Content",
-      "type": "@n8n/n8n-nodes-langchain.openAi",
-      "typeVersion": 2.1,
+      "type": "@n8n/n8n-nodes-langchain.ollama",
+      "typeVersion": 1,
       "position": [300, 300],
       "parameters": {
         "resource": "text",
-        "operation": "response",
+        "operation": "message",
         "modelId": {
           "__rl": true,
-          "mode": "list",
-          "value": "gpt-4o-mini",
-          "cachedResultName": "GPT-4O-MINI"
+          "mode": "id",
+          "value": "mistral"
         },
         "messages": {
           "values": [
             {
-              "role": "system",
-              "content": "You are a professional social media content creator for a Facebook Page. Your job is to write engaging, original Facebook posts.\n\nRules:\n- Keep posts under 500 characters\n- Vary topics: motivation, tips, industry insights, questions to engage followers, fun facts\n- Write in a warm, conversational tone\n- Include a call-to-action when appropriate (like, comment, share)\n- Do NOT use excessive hashtags (max 2 if relevant)\n- Output ONLY the post text, nothing else — no labels, no quotes, no explanations"
-            },
-            {
+              "role": "user",
               "content": "Write an engaging Facebook post for today. Be creative and pick a fresh topic."
             }
           ]
         },
-        "options": {}
+        "simplify": true,
+        "options": {
+          "system": "You are a professional social media content creator for a Facebook Page. Your job is to write engaging, original Facebook posts.\n\nRules:\n- Keep posts under 500 characters\n- Vary topics: motivation, tips, industry insights, questions to engage followers, fun facts\n- Write in a warm, conversational tone\n- Include a call-to-action when appropriate (like, comment, share)\n- Do NOT use excessive hashtags (max 2 if relevant)\n- Output ONLY the post text, nothing else — no labels, no quotes, no explanations",
+          "num_predict": 512,
+          "temperature": 0.9
+        }
+      },
+      "credentials": {
+        "ollamaApi": {
+          "id": "QWd9SzHgWsOiDEb2",
+          "name": "Ollama Local"
+        }
       },
       "onError": "continueErrorOutput"
     },
@@ -59,7 +66,7 @@
         "url": "https://graph.facebook.com/v21.0/YOUR_PAGE_ID/feed",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ message: $json.output || $json.text || $json.content, access_token: 'YOUR_PAGE_ACCESS_TOKEN' }) }}",
+        "jsonBody": "={{ JSON.stringify({ message: $json.message || $json.output || $json.text || $json.content || $json.response, access_token: 'YOUR_PAGE_ACCESS_TOKEN' }) }}",
         "options": {
           "response": {
             "response": {
@@ -80,24 +87,9 @@
         "mode": "manual",
         "assignments": {
           "assignments": [
-            {
-              "id": "a1",
-              "name": "status",
-              "type": "string",
-              "value": "success"
-            },
-            {
-              "id": "a2",
-              "name": "postId",
-              "type": "string",
-              "value": "={{ $json.id }}"
-            },
-            {
-              "id": "a3",
-              "name": "timestamp",
-              "type": "string",
-              "value": "={{ $now.toISO() }}"
-            }
+            {"id": "a1", "name": "status", "type": "string", "value": "success"},
+            {"id": "a2", "name": "postId", "type": "string", "value": "={{ $json.id }}"},
+            {"id": "a3", "name": "timestamp", "type": "string", "value": "={{ $now.toISO() }}"}
           ]
         },
         "options": {}
@@ -113,24 +105,9 @@
         "mode": "manual",
         "assignments": {
           "assignments": [
-            {
-              "id": "b1",
-              "name": "status",
-              "type": "string",
-              "value": "facebook_error"
-            },
-            {
-              "id": "b2",
-              "name": "error",
-              "type": "string",
-              "value": "={{ $json.error ? $json.error.message : JSON.stringify($json) }}"
-            },
-            {
-              "id": "b3",
-              "name": "timestamp",
-              "type": "string",
-              "value": "={{ $now.toISO() }}"
-            }
+            {"id": "b1", "name": "status", "type": "string", "value": "facebook_error"},
+            {"id": "b2", "name": "error", "type": "string", "value": "={{ typeof $json.error === 'string' ? $json.error : ($json.error ? $json.error.message : JSON.stringify($json)) }}"},
+            {"id": "b3", "name": "timestamp", "type": "string", "value": "={{ $now.toISO() }}"}
           ]
         },
         "options": {}
@@ -138,7 +115,7 @@
     },
     {
       "id": "set-ai-error-1",
-      "name": "Log OpenAI Error",
+      "name": "Log AI Error",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [600, 600],
@@ -146,24 +123,9 @@
         "mode": "manual",
         "assignments": {
           "assignments": [
-            {
-              "id": "c1",
-              "name": "status",
-              "type": "string",
-              "value": "openai_error"
-            },
-            {
-              "id": "c2",
-              "name": "error",
-              "type": "string",
-              "value": "={{ $json.error ? $json.error.message : JSON.stringify($json) }}"
-            },
-            {
-              "id": "c3",
-              "name": "timestamp",
-              "type": "string",
-              "value": "={{ $now.toISO() }}"
-            }
+            {"id": "c1", "name": "status", "type": "string", "value": "ollama_error"},
+            {"id": "c2", "name": "error", "type": "string", "value": "={{ typeof $json.error === 'string' ? $json.error : ($json.error ? $json.error.message : JSON.stringify($json)) }}"},
+            {"id": "c3", "name": "timestamp", "type": "string", "value": "={{ $now.toISO() }}"}
           ]
         },
         "options": {}
@@ -172,50 +134,18 @@
   ],
   "connections": {
     "Daily 9AM Trigger": {
-      "main": [
-        [
-          {
-            "node": "Generate Post Content",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+      "main": [[{"node": "Generate Post Content", "type": "main", "index": 0}]]
     },
     "Generate Post Content": {
       "main": [
-        [
-          {
-            "node": "Publish to Facebook",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Log OpenAI Error",
-            "type": "main",
-            "index": 0
-          }
-        ]
+        [{"node": "Publish to Facebook", "type": "main", "index": 0}],
+        [{"node": "Log AI Error", "type": "main", "index": 0}]
       ]
     },
     "Publish to Facebook": {
       "main": [
-        [
-          {
-            "node": "Log Success",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Log Facebook Error",
-            "type": "main",
-            "index": 0
-          }
-        ]
+        [{"node": "Log Success", "type": "main", "index": 0}],
+        [{"node": "Log Facebook Error", "type": "main", "index": 0}]
       ]
     }
   },

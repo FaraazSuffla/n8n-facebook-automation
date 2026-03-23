@@ -1,0 +1,20 @@
+# n8n data (may contain credentials/secrets)
+n8n-data/
+n8n-data;C/
+
+# Environment files
+.env
+.env.*
+
+# Secrets
+*.key
+*.pem
+credentials.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temp files
+/tmp/
+*.tmp

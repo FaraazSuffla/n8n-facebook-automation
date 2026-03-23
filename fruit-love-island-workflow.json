@@ -1,0 +1,260 @@
+{
+  "name": "Fruit Love Island - AI Episode Generator & Facebook Publisher",
+  "nodes": [
+    {
+      "id": "trigger-1",
+      "name": "Episode Schedule (2x Daily)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [0, 400],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 12
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "openai-story-1",
+      "name": "Generate Episode Script",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.1,
+      "position": [300, 400],
+      "parameters": {
+        "resource": "text",
+        "operation": "response",
+        "modelId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4o",
+          "cachedResultName": "GPT-4O"
+        },
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "You are a viral social media content creator specializing in short-form episodic drama for South African Facebook audiences.\n\nYou write \"Fruit Love Island\" — a reality TV parody where anthropomorphic fruit characters live in a luxurious villa, compete for love, form alliances, backstab, flirt, and create DRAMA.\n\nRECURRING CHARACTERS (use at least 3-4 per episode):\n- Banana Brad: Smooth-talking player, always flexing, thinks he's the main character\n- Strawberry Sindi: Gorgeous drama queen from Durban, uses \"hayibo\" every 5 seconds\n- Apple Andile: The nice guy who always gets friend-zoned, loyal to a fault\n- Mango Mpho: The wildcard from Joburg, unpredictable, drops bombshells\n- Grape Gloria: The wise aunty figure, gives unsolicited advice, secretly messy\n- Watermelon Wandi: New arrival who causes chaos, everyone's attracted to them\n- Peach Palesa: Sneaky strategist, plays both sides, master manipulator\n- Pineapple Pete: The comic relief, always eating, drops hilarious one-liners\n\nSTYLE REQUIREMENTS:\n- Heavy South African slang: \"yoh\", \"hayibo\", \"eish\", \"shame\", \"this one is forward\", \"it's giving messy\"\n- Reality TV drama: confessionals, shocking reveals, cliffhangers\n- Humor mixed with genuine emotion\n- Each episode builds on ongoing storylines\n\nOUTPUT FORMAT — Return ONLY valid JSON, no markdown:\n{\n  \"episodeNumber\": <random 1-999>,\n  \"title\": \"<dramatic episode title>\",\n  \"recap\": \"<1 sentence Previously On recap>\",\n  \"scenes\": [\n    {\n      \"sceneNumber\": 1,\n      \"location\": \"<villa location: pool, kitchen, confession room, garden, hot tub, etc.>\",\n      \"characters\": [\"<character names>\"],\n      \"action\": \"<what happens in 1-2 sentences>\",\n      \"dialogue\": \"<key dialogue line for subtitles - max 15 words>\",\n      \"mood\": \"<dramatic/funny/romantic/tense/shocking>\",\n      \"imagePrompt\": \"<DALL-E prompt: Pixar-style 3D render, anthropomorphic [fruit] characters with expressive faces and human bodies, [location] in luxury Love Island villa, [mood] lighting, cinematic composition, colorful, dramatic, 16:9 aspect ratio>\"\n    }\n  ],\n  \"cliffhanger\": \"<dramatic cliffhanger ending sentence>\",\n  \"nextEpisodeTeaser\": \"<1 sentence teaser for next episode>\"\n}\n\nGenerate exactly 6 scenes per episode. Make it DRAMATIC and ENTERTAINING."
+            },
+            {
+              "content": "Generate a brand new episode of Fruit Love Island. Make it dramatic, funny, and full of South African flavour. Surprise me with the storyline!"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "code-parse-1",
+      "name": "Parse Episode & Extract Scenes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [600, 400],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Parse the episode JSON from OpenAI response\nconst input = $input.first().json;\n\n// Extract the text content - handle different response shapes\nlet rawText = input.output || input.text || input.content || '';\nif (typeof rawText === 'object') rawText = JSON.stringify(rawText);\n\n// Clean markdown code fences if present\nrawText = rawText.replace(/^```json\\s*/i, '').replace(/```\\s*$/, '').trim();\n\nlet episode;\ntry {\n  episode = JSON.parse(rawText);\n} catch (e) {\n  // Try to extract JSON from the text\n  const match = rawText.match(/\\{[\\s\\S]*\\}/);\n  if (match) {\n    episode = JSON.parse(match[0]);\n  } else {\n    throw new Error('Could not parse episode JSON: ' + e.message);\n  }\n}\n\n// Validate required fields\nif (!episode.scenes || !Array.isArray(episode.scenes)) {\n  throw new Error('Episode missing scenes array');\n}\n\n// Output one item per scene, each carrying full episode context\nconst scenes = episode.scenes.map((scene, idx) => ({\n  json: {\n    episodeNumber: episode.episodeNumber || 1,\n    episodeTitle: episode.title || 'Untitled Episode',\n    recap: episode.recap || '',\n    cliffhanger: episode.cliffhanger || '',\n    nextEpisodeTeaser: episode.nextEpisodeTeaser || '',\n    totalScenes: episode.scenes.length,\n    sceneIndex: idx,\n    sceneNumber: scene.sceneNumber || (idx + 1),\n    location: scene.location || 'villa',\n    characters: scene.characters || [],\n    action: scene.action || '',\n    dialogue: scene.dialogue || '',\n    mood: scene.mood || 'dramatic',\n    imagePrompt: scene.imagePrompt || `Pixar-style 3D render, anthropomorphic fruit characters in luxury villa, ${scene.mood || 'dramatic'} lighting, cinematic, colorful, 16:9`,\n    fullEpisode: episode\n  }\n}));\n\nreturn scenes;"
+      }
+    },
+    {
+      "id": "openai-image-1",
+      "name": "Generate Scene Images (DALL-E)",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.1,
+      "position": [900, 400],
+      "parameters": {
+        "resource": "image",
+        "operation": "generate",
+        "model": "dall-e-3",
+        "prompt": "={{ $json.imagePrompt }}",
+        "options": {}
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "code-aggregate-1",
+      "name": "Aggregate Scenes & Prepare Video",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1200, 400],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Collect all scene results with their image URLs\nconst items = $input.all();\nconst scenes = [];\nlet episodeData = null;\n\nfor (let i = 0; i < items.length; i++) {\n  const item = items[i].json;\n  \n  // Get episode data from first item\n  if (!episodeData && item.episodeTitle) {\n    episodeData = {\n      episodeNumber: item.episodeNumber,\n      title: item.episodeTitle,\n      recap: item.recap,\n      cliffhanger: item.cliffhanger,\n      nextEpisodeTeaser: item.nextEpisodeTeaser\n    };\n  }\n  \n  // Extract image URL from OpenAI response\n  // DALL-E 3 returns url in the response data\n  const imageUrl = item.url || item.data?.[0]?.url || item.image_url || '';\n  \n  scenes.push({\n    sceneNumber: item.sceneNumber || (i + 1),\n    dialogue: item.dialogue || `Scene ${i + 1}`,\n    mood: item.mood || 'dramatic',\n    location: item.location || 'villa',\n    characters: item.characters || [],\n    action: item.action || '',\n    imageUrl: imageUrl,\n    imagePrompt: item.imagePrompt || ''\n  });\n}\n\nif (!episodeData) {\n  episodeData = { episodeNumber: 1, title: 'Fruit Love Island', recap: '', cliffhanger: '', nextEpisodeTeaser: '' };\n}\n\n// Build subtitle content (SRT format) for FFmpeg\nlet srtContent = '';\nconst secondsPerScene = 5; // 5 seconds per scene image\n\nscenes.forEach((scene, idx) => {\n  const startSec = idx * secondsPerScene;\n  const endSec = startSec + secondsPerScene;\n  const startTime = `00:00:${String(startSec).padStart(2, '0')},000`;\n  const endTime = `00:00:${String(endSec).padStart(2, '0')},000`;\n  \n  srtContent += `${idx + 1}\\n${startTime} --> ${endTime}\\n${scene.dialogue}\\n\\n`;\n});\n\n// Build image download + FFmpeg command\nconst workDir = '/tmp/fruit-love-island';\nconst imageDownloads = scenes.map((s, i) => \n  s.imageUrl ? `curl -sL \"${s.imageUrl}\" -o ${workDir}/scene_${i}.png` : `echo \"No image for scene ${i}\"`\n).join(' && ');\n\nconst inputFiles = scenes.map((s, i) => \n  `-loop 1 -t ${secondsPerScene} -i ${workDir}/scene_${i}.png`\n).join(' ');\n\nconst filterParts = scenes.map((s, i) => \n  `[${i}:v]scale=1024:1024,setsar=1[v${i}]`\n).join('; ');\n\nconst concatInputs = scenes.map((s, i) => `[v${i}]`).join('');\nconst totalDuration = scenes.length * secondsPerScene;\n\nconst ffmpegCmd = `ffmpeg -y ${inputFiles} -filter_complex \"${filterParts}; ${concatInputs}concat=n=${scenes.length}:v=1:a=0[outv]\" -map \"[outv]\" -c:v libx264 -pix_fmt yuv420p -r 24 -t ${totalDuration} ${workDir}/episode.mp4`;\n\nconst fullCommand = `mkdir -p ${workDir} && ${imageDownloads} && echo '${srtContent.replace(/'/g, \"'\\\\''\")}' > ${workDir}/subtitles.srt && ${ffmpegCmd}`;\n\nreturn [{\n  json: {\n    ...episodeData,\n    scenes: scenes,\n    srtContent: srtContent,\n    videoCommand: fullCommand,\n    videoPath: `${workDir}/episode.mp4`,\n    workDir: workDir,\n    totalDuration: totalDuration,\n    sceneCount: scenes.length\n  }\n}];"
+      }
+    },
+    {
+      "id": "exec-ffmpeg-1",
+      "name": "Create Video (FFmpeg)",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [1500, 400],
+      "parameters": {
+        "command": "={{ $json.videoCommand }}"
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "openai-caption-1",
+      "name": "Generate Facebook Caption",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.1,
+      "position": [1800, 400],
+      "parameters": {
+        "resource": "text",
+        "operation": "response",
+        "modelId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4o-mini",
+          "cachedResultName": "GPT-4O-MINI"
+        },
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "You write viral Facebook captions for \"Fruit Love Island\" — a dramatic reality TV parody with anthropomorphic fruit characters, targeted at South African audiences.\n\nCAPTION STYLE:\n- Start with a dramatic hook (e.g., \"YOH this episode is HECTIC\" or \"Hayibo... who saw THAT coming?!\")\n- 2-3 lines of dramatic commentary about the episode\n- Use South African slang naturally\n- Include emojis (fire, crying, shocked, heart, etc.)\n- End with engagement hooks: \"Who's team are you on?\", \"Comment your fave character!\", \"Tag someone who's just like Banana Brad\"\n- Add 3-5 relevant hashtags: #FruitLoveIsland #SAMemes #DramaAlert etc.\n- Keep total caption under 300 words\n- Make it feel like a real person posting, not a brand\n\nOutput ONLY the caption text. No labels or explanations."
+            },
+            {
+              "content": "={{ 'Write a Facebook caption for this Fruit Love Island episode:\\n\\nTitle: ' + $json.title + '\\nRecap: ' + $json.recap + '\\nCliffhanger: ' + $json.cliffhanger + '\\nScenes: ' + JSON.stringify(($json.scenes || []).map(function(s) { return s.dialogue; })) }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "code-prepare-upload-1",
+      "name": "Prepare Facebook Upload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2100, 400],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Combine caption with video path for Facebook upload\nconst captionItem = $input.first().json;\nconst caption = captionItem.output || captionItem.text || captionItem.content || 'New episode of Fruit Love Island!';\n\n// Get episode data from previous nodes using $('node name') \nconst episodeData = $('Aggregate Scenes & Prepare Video').first().json;\n\nreturn [{\n  json: {\n    caption: caption,\n    videoPath: episodeData.videoPath || '/tmp/fruit-love-island/episode.mp4',\n    episodeTitle: episodeData.title || 'Fruit Love Island',\n    episodeNumber: episodeData.episodeNumber || 1,\n    sceneCount: episodeData.sceneCount || 6\n  }\n}];"
+      }
+    },
+    {
+      "id": "exec-upload-1",
+      "name": "Upload Video to Facebook",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [2400, 400],
+      "parameters": {
+        "command": "={{ 'curl -s -X POST \"https://graph-video.facebook.com/v21.0/YOUR_PAGE_ID/videos\" -F \"source=@' + $json.videoPath + '\" -F \"description=' + encodeURIComponent($json.caption) + '\" -F \"access_token=YOUR_PAGE_ACCESS_TOKEN\"' }}"
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "set-success-1",
+      "name": "Log Success",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [2700, 300],
+      "parameters": {
+        "mode": "manual",
+        "assignments": {
+          "assignments": [
+            {"id": "s1", "name": "status", "type": "string", "value": "success"},
+            {"id": "s2", "name": "episodeTitle", "type": "string", "value": "={{ $('Prepare Facebook Upload').first().json.episodeTitle }}"},
+            {"id": "s3", "name": "timestamp", "type": "string", "value": "={{ $now.toISO() }}"},
+            {"id": "s4", "name": "facebookResponse", "type": "string", "value": "={{ JSON.stringify($json) }}"}
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "set-post-error-1",
+      "name": "Log Post/Video Error",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [2700, 600],
+      "parameters": {
+        "mode": "manual",
+        "assignments": {
+          "assignments": [
+            {"id": "e1", "name": "status", "type": "string", "value": "post_or_video_error"},
+            {"id": "e2", "name": "error", "type": "string", "value": "={{ $json.error ? $json.error.message : JSON.stringify($json) }}"},
+            {"id": "e3", "name": "stage", "type": "string", "value": "video_creation_or_facebook_upload"},
+            {"id": "e4", "name": "timestamp", "type": "string", "value": "={{ $now.toISO() }}"}
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "set-script-error-1",
+      "name": "Log Script/Image Error",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [600, 700],
+      "parameters": {
+        "mode": "manual",
+        "assignments": {
+          "assignments": [
+            {"id": "f1", "name": "status", "type": "string", "value": "generation_error"},
+            {"id": "f2", "name": "error", "type": "string", "value": "={{ $json.error ? $json.error.message : JSON.stringify($json) }}"},
+            {"id": "f3", "name": "stage", "type": "string", "value": "script_or_image_generation"},
+            {"id": "f4", "name": "timestamp", "type": "string", "value": "={{ $now.toISO() }}"}
+          ]
+        },
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Episode Schedule (2x Daily)": {
+      "main": [[{"node": "Generate Episode Script", "type": "main", "index": 0}]]
+    },
+    "Generate Episode Script": {
+      "main": [
+        [{"node": "Parse Episode & Extract Scenes", "type": "main", "index": 0}],
+        [{"node": "Log Script/Image Error", "type": "main", "index": 0}]
+      ]
+    },
+    "Parse Episode & Extract Scenes": {
+      "main": [[{"node": "Generate Scene Images (DALL-E)", "type": "main", "index": 0}]]
+    },
+    "Generate Scene Images (DALL-E)": {
+      "main": [
+        [{"node": "Aggregate Scenes & Prepare Video", "type": "main", "index": 0}],
+        [{"node": "Log Script/Image Error", "type": "main", "index": 0}]
+      ]
+    },
+    "Aggregate Scenes & Prepare Video": {
+      "main": [[{"node": "Create Video (FFmpeg)", "type": "main", "index": 0}]]
+    },
+    "Create Video (FFmpeg)": {
+      "main": [
+        [{"node": "Generate Facebook Caption", "type": "main", "index": 0}],
+        [{"node": "Log Post/Video Error", "type": "main", "index": 0}]
+      ]
+    },
+    "Generate Facebook Caption": {
+      "main": [
+        [{"node": "Prepare Facebook Upload", "type": "main", "index": 0}],
+        [{"node": "Log Post/Video Error", "type": "main", "index": 0}]
+      ]
+    },
+    "Prepare Facebook Upload": {
+      "main": [[{"node": "Upload Video to Facebook", "type": "main", "index": 0}]]
+    },
+    "Upload Video to Facebook": {
+      "main": [
+        [{"node": "Log Success", "type": "main", "index": 0}],
+        [{"node": "Log Post/Video Error", "type": "main", "index": 0}]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "timezone": "Africa/Johannesburg",
+    "executionTimeout": 600
+  }
+}

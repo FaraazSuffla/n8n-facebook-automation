@@ -63,7 +63,7 @@
       ],
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "const { execSync } = require('child_process');\nconst data = $input.first().json;\nfunction getEnv(name, fallback) {\n  try { return execSync('printenv ' + name, { encoding: 'utf8' }).trim() || fallback; }\n  catch(e) { return fallback; }\n}\nconst env = {\n  OLLAMA_MODEL: getEnv('OLLAMA_MODEL', 'mistral'),\n  KIE_AI_API_KEY: getEnv('KIE_AI_API_KEY', ''),\n  IMGBB_API_KEY: getEnv('IMGBB_API_KEY', ''),\n  POLLINATIONS_API_KEY: getEnv('POLLINATIONS_API_KEY', ''),\n  DISCORD_WEBHOOK_URL: getEnv('DISCORD_WEBHOOK_URL', ''),\n  FACEBOOK_PAGE_ID: getEnv('FACEBOOK_PAGE_ID', ''),\n  FACEBOOK_ACCESS_TOKEN: getEnv('FACEBOOK_ACCESS_TOKEN', '')\n};\nreturn [{ json: { ...data, env } }];"
+        "jsCode": "const fs = require('fs');\nconst data = $input.first().json;\nlet envMap = {};\ntry {\n  const raw = fs.readFileSync('/proc/1/environ', 'utf8');\n  raw.split('\\0').forEach(line => { const eq = line.indexOf('='); if (eq > 0) envMap[line.slice(0, eq)] = line.slice(eq + 1); });\n} catch(e) {}\nconst env = {\n  OLLAMA_MODEL: envMap.OLLAMA_MODEL || 'mistral',\n  KIE_AI_API_KEY: envMap.KIE_AI_API_KEY || '',\n  IMGBB_API_KEY: envMap.IMGBB_API_KEY || '',\n  POLLINATIONS_API_KEY: envMap.POLLINATIONS_API_KEY || '',\n  DISCORD_WEBHOOK_URL: envMap.DISCORD_WEBHOOK_URL || '',\n  FACEBOOK_PAGE_ID: envMap.FACEBOOK_PAGE_ID || '',\n  FACEBOOK_ACCESS_TOKEN: envMap.FACEBOOK_ACCESS_TOKEN || ''\n};\nreturn [{ json: { ...data, env } }];"
       }
     },
     {
@@ -77,7 +77,7 @@
       ],
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "const fs = require('fs');\nconst data = $input.first().json;\nconst workDir = '/tmp/episodes/episode_' + data.episode_number;\n\nif (!fs.existsSync(workDir)) {\n  fs.mkdirSync(workDir, { recursive: true });\n}\n\nreturn [{ json: { ...data, workDir: workDir } }];"
+        "jsCode": "const fs = require('fs');\nconst data = $input.first().json;\nconst workDir = '/home/node/.n8n/episodes/episode_' + data.episode_number;\n\nif (!fs.existsSync(workDir)) {\n  fs.mkdirSync(workDir, { recursive: true });\n}\n\nreturn [{ json: { ...data, workDir: workDir } }];"
       }
     },
     {
@@ -140,14 +140,14 @@
       ],
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "const input = $input.first().json;\nconst queueData = $('Carry Episode Data Forward').first().json;\n\nlet rawText = '';\nif (input.message && input.message.content) {\n  rawText = input.message.content;\n} else if (typeof input === 'string') {\n  rawText = input;\n} else {\n  rawText = JSON.stringify(input);\n}\n\nrawText = rawText.replace(/^```json\\s*/i, '').replace(/```\\s*$/, '').trim();\n\nlet episode;\ntry {\n  episode = typeof rawText === 'object' ? rawText : JSON.parse(rawText);\n} catch (e) {\n  const match = rawText.match(/\\{[\\s\\S]*\\}/);\n  if (match) {\n    episode = JSON.parse(match[0]);\n  } else {\n    throw new Error('Could not parse episode JSON: ' + e.message + ' Raw: ' + rawText.slice(0, 300));\n  }\n}\n\nif (!episode.scenes || !Array.isArray(episode.scenes)) {\n  throw new Error('Episode missing scenes array');\n}\n\nconst narratorParts = [];\nif (episode.narrator_intro) narratorParts.push(episode.narrator_intro);\nepisode.scenes.forEach(s => {\n  if (s.narrator_vo) narratorParts.push(s.narrator_vo);\n});\nif (episode.narrator_outro) narratorParts.push(episode.narrator_outro);\nconst fullNarratorScript = narratorParts.join(' ... ');\n\nconst scenes = episode.scenes.map((scene, idx) => ({\n  json: {\n    episode_number: queueData.episode_number,\n    episode_title: episode.episode_title || 'Untitled Episode',\n    cliffhanger: episode.cliffhanger || '',\n    fullNarratorScript: fullNarratorScript,\n    totalScenes: episode.scenes.length,\n    sceneIndex: idx,\n    scene_number: scene.scene_number || (idx + 1),\n    location: scene.location || 'villa',\n    characters: scene.characters || [],\n    visual_prompt: scene.visual_prompt || scene.imagePrompt || '',\n    narrator_vo: scene.narrator_vo || '',\n    action: scene.action || '',\n    dialogue: scene.dialogue || '',\n    mood: scene.mood || 'dramatic',\n    duration_seconds: scene.duration_seconds || 5,\n    characterBible: queueData.characterBible || {},\n    workDir: '/tmp/episodes/episode_' + queueData.episode_number\n  }\n}));\n\nreturn scenes;"
+        "jsCode": "const input = $input.first().json;\nconst queueData = $('Carry Episode Data Forward').first().json;\n\nlet rawText = '';\nif (input.message && input.message.content) {\n  rawText = input.message.content;\n} else if (typeof input === 'string') {\n  rawText = input;\n} else {\n  rawText = JSON.stringify(input);\n}\n\nrawText = rawText.replace(/^```json\\s*/i, '').replace(/```\\s*$/, '').trim();\n\nfunction repairJson(s) {\n  s = s.replace(/[\\x00-\\x1f]/g, m => m === '\\n' || m === '\\t' ? m : '');\n  s = s.replace(/,\\s*([}\\]])/g, '$1');\n  let braces = 0, inStr = false, esc = false;\n  for (let i = 0; i < s.length; i++) {\n    const c = s[i];\n    if (esc) { esc = false; continue; }\n    if (c === '\\\\') { esc = true; continue; }\n    if (c === '\"') inStr = !inStr;\n    if (!inStr) { if (c === '{') braces++; if (c === '}') braces--; }\n  }\n  while (braces > 0) { s += '}'; braces--; }\n  if (inStr) { s = s.slice(0, s.lastIndexOf('\"')) + '\"' + '}'.repeat(Math.max(0,braces+1)); }\n  return s;\n}\n\nlet episode;\ntry {\n  episode = typeof rawText === 'object' ? rawText : JSON.parse(rawText);\n} catch (e) {\n  try {\n    episode = JSON.parse(repairJson(rawText));\n  } catch (e2) {\n    const match = rawText.match(/\\{[\\s\\S]*\\}/);\n    if (match) {\n      try { episode = JSON.parse(match[0]); } catch(e3) { episode = JSON.parse(repairJson(match[0])); }\n    } else {\n      throw new Error('Could not parse episode JSON: ' + e.message + ' Raw: ' + rawText.slice(0, 300));\n    }\n  }\n}\n\nif (!episode.scenes || !Array.isArray(episode.scenes)) {\n  throw new Error('Episode missing scenes array');\n}\n\nconst narratorParts = [];\nif (episode.narrator_intro) narratorParts.push(episode.narrator_intro);\nepisode.scenes.forEach(s => {\n  if (s.narrator_vo) narratorParts.push(s.narrator_vo);\n});\nif (episode.narrator_outro) narratorParts.push(episode.narrator_outro);\nconst fullNarratorScript = narratorParts.join(' ... ');\n\nconst scenes = episode.scenes.map((scene, idx) => ({\n  json: {\n    episode_number: queueData.episode_number,\n    episode_title: episode.episode_title || 'Untitled Episode',\n    cliffhanger: episode.cliffhanger || '',\n    fullNarratorScript: fullNarratorScript,\n    totalScenes: episode.scenes.length,\n    sceneIndex: idx,\n    scene_number: scene.scene_number || (idx + 1),\n    location: scene.location || 'villa',\n    characters: scene.characters || [],\n    visual_prompt: scene.visual_prompt || scene.imagePrompt || '',\n    narrator_vo: scene.narrator_vo || '',\n    action: scene.action || '',\n    dialogue: scene.dialogue || '',\n    mood: scene.mood || 'dramatic',\n    duration_seconds: scene.duration_seconds || 5,\n    characterBible: queueData.characterBible || {},\n    workDir: '/home/node/.n8n/episodes/episode_' + queueData.episode_number\n  }\n}));\n\nreturn scenes;"
       }
     },
     {
       "id": "split-batch-1",
       "name": "Process Scenes One by One",
       "type": "n8n-nodes-base.splitInBatches",
-      "typeVersion": 3,
+      "typeVersion": 1,
       "position": [
         2100,
         400
@@ -203,7 +203,7 @@
       ],
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const item = $input.item.json;\nconst sceneData = $('Process Scenes One by One').first().json;\n\nlet refinedPrompt = '';\nif (item.message && item.message.content) {\n  refinedPrompt = item.message.content;\n} else {\n  refinedPrompt = sceneData.visual_prompt;\n}\n\nrefinedPrompt = refinedPrompt.replace(/```/g, '').replace(/^\\s*prompt:\\s*/i, '').trim();\n\nconst characters = sceneData.characters || [];\nconst bible = (sceneData.characterBible || {}).characters || {};\nlet seed = sceneData.scene_number * 1000;\nif (characters.length > 0 && bible[characters[0]]) {\n  seed = bible[characters[0]].seed || seed;\n}\n\nconst imageUrl = 'https://gen.pollinations.ai/prompt/' + encodeURIComponent(refinedPrompt) + '?width=1080&height=1920&nologo=true&seed=' + seed + '&model=flux';\n\nreturn {\n  json: {\n    ...sceneData,\n    refinedPrompt: refinedPrompt,\n    imageUrl: imageUrl,\n    imageSeed: seed\n  }\n};"
+        "jsCode": "const item = $input.item.json;\nconst sceneData = $('Process Scenes One by One').first().json;\n\nlet refinedPrompt = '';\nif (item.message && item.message.content) {\n  refinedPrompt = item.message.content;\n} else {\n  refinedPrompt = sceneData.visual_prompt;\n}\n\nrefinedPrompt = refinedPrompt.replace(/```/g, '').replace(/^\\s*prompt:\\s*/i, '').trim();\n\nconst characters = sceneData.characters || [];\nconst bible = (sceneData.characterBible || {}).characters || {};\nlet seed = sceneData.scene_number * 1000;\nif (characters.length > 0 && bible[characters[0]]) {\n  seed = bible[characters[0]].seed || seed;\n}\n\nconst apiKey = $('Parse Queue & Find Next Episode').first().json.env.POLLINATIONS_API_KEY || '';\nconst imageUrl = 'https://gen.pollinations.ai/image/' + encodeURIComponent(refinedPrompt) + '?width=1080&height=1920&nologo=true&seed=' + seed + '&model=flux&key=' + apiKey;\n\nreturn {\n  json: {\n    ...sceneData,\n    refinedPrompt: refinedPrompt,\n    imageUrl: imageUrl,\n    imageSeed: seed\n  }\n};"
       }
     },
     {
@@ -220,6 +220,11 @@
         "url": "={{ $json.imageUrl }}",
         "options": {
           "timeout": 120000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": true
+            }
+          },
           "response": {
             "response": {
               "responseFormat": "file"
@@ -231,18 +236,16 @@
     },
     {
       "id": "write-image-1",
-      "name": "Save Image to Disk",
-      "type": "n8n-nodes-base.readWriteFile",
-      "typeVersion": 1.1,
+      "name": "Pass Image Through",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
       "position": [
         3300,
         400
       ],
       "parameters": {
-        "operation": "write",
-        "fileName": "={{ $('Prepare Image Request').first().json.workDir + '/scene_' + $('Prepare Image Request').first().json.scene_number + '.png' }}",
-        "dataPropertyName": "data",
-        "options": {}
+        "mode": "runOnceForEachItem",
+        "jsCode": "const sceneData = $('Prepare Image Request').first().json;\nreturn { json: sceneData };"
       },
       "onError": "continueErrorOutput"
     },
@@ -257,7 +260,7 @@
       ],
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const sceneData = $('Prepare Image Request').first().json;\nconst binaryData = $input.item.binary;\nconst binaryKey = Object.keys(binaryData || {})[0];\nlet imageBase64 = '';\nif (binaryKey && binaryData[binaryKey]) {\n  imageBase64 = binaryData[binaryKey].data;\n}\n\nreturn {\n  json: {\n    ...sceneData,\n    imageBase64: imageBase64\n  }\n};"
+        "jsCode": "const sceneData = $('Prepare Image Request').first().json;\nconst binaryData = $('Generate Image (Pollinations)').first().binary;\nconst binaryKey = Object.keys(binaryData || {})[0];\nlet imageBase64 = '';\nif (binaryKey && binaryData[binaryKey]) {\n  imageBase64 = binaryData[binaryKey].data;\n}\nreturn {\n  json: {\n    ...sceneData,\n    imageBase64: imageBase64\n  }\n};"
       }
     },
     {
@@ -522,7 +525,7 @@
       ],
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "const firstScene = $('Parse Episode & Extract Scenes').first().json;\nreturn [{\n  json: {\n    fullNarratorScript: firstScene.fullNarratorScript || 'Welcome to Fruit Love Island!',\n    episode_number: firstScene.episode_number,\n    episode_title: firstScene.episode_title,\n    cliffhanger: firstScene.cliffhanger || '',\n    workDir: firstScene.workDir,\n    totalScenes: firstScene.totalScenes\n  }\n}];"
+        "jsCode": "const firstScene = $('Parse Episode & Extract Scenes').first().json;\nconst env = $('Parse Queue & Find Next Episode').first().json.env || {};\nreturn [{\n  json: {\n    fullNarratorScript: firstScene.fullNarratorScript || 'Welcome to Fruit Love Island!',\n    episode_number: firstScene.episode_number,\n    episode_title: firstScene.episode_title,\n    cliffhanger: firstScene.cliffhanger || '',\n    workDir: firstScene.workDir,\n    totalScenes: firstScene.totalScenes,\n    env: env\n  }\n}];"
       }
     },
     {
@@ -546,7 +549,7 @@
             },
             {
               "name": "Authorization",
-              "value": "=Bearer {{ $('Parse Queue & Find Next Episode').first().json.env.POLLINATIONS_API_KEY }}"
+              "value": "=Bearer {{ $json.env.POLLINATIONS_API_KEY }}"
             }
           ]
         },
@@ -1015,7 +1018,7 @@
       "main": [
         [
           {
-            "node": "Save Image to Disk",
+            "node": "Pass Image Through",
             "type": "main",
             "index": 0
           }
@@ -1029,7 +1032,7 @@
         ]
       ]
     },
-    "Save Image to Disk": {
+    "Pass Image Through": {
       "main": [
         [
           {

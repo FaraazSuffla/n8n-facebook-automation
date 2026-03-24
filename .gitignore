@@ -4,7 +4,10 @@ n8n-data;C/
 
 # Environment files
 .env
-.env.*
+!.env.example
+
+# Generated video output
+videos/
 
 # Secrets
 *.key

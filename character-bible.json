@@ -1,0 +1,52 @@
+{
+  "characters": {
+    "Banana Brad": {
+      "fruit": "banana",
+      "description": "anthropomorphic banana man, yellow smooth skin, muscular build, confident smirk, wearing gold chain and white vest, slicked-back green leaf hair, Pixar 3D style",
+      "seed": 42001,
+      "personality": "Smooth-talking player, always flexing, thinks he's the main character"
+    },
+    "Strawberry Sindi": {
+      "fruit": "strawberry",
+      "description": "anthropomorphic strawberry woman, red glossy skin with tiny seed freckles, long green leaf hair flowing down, dramatic expression, gold hoop earrings, stylish crop top, Pixar 3D style",
+      "seed": 42002,
+      "personality": "Gorgeous drama queen from Durban, uses hayibo every 5 seconds"
+    },
+    "Apple Andile": {
+      "fruit": "apple",
+      "description": "anthropomorphic green apple man, bright green smooth skin, kind gentle eyes, neat short leaf hair, wearing casual button-up shirt, slightly shy posture, Pixar 3D style",
+      "seed": 42003,
+      "personality": "The nice guy who always gets friend-zoned, loyal to a fault"
+    },
+    "Mango Mpho": {
+      "fruit": "mango",
+      "description": "anthropomorphic mango person, gradient orange-yellow skin, wild spiky leaf hair, mischievous grin, wearing bold streetwear and sunglasses, confident stance, Pixar 3D style",
+      "seed": 42004,
+      "personality": "The wildcard from Joburg, unpredictable, drops bombshells"
+    },
+    "Grape Gloria": {
+      "fruit": "grape",
+      "description": "anthropomorphic grape woman, deep purple skin, cluster of small grapes as hair bun, wise knowing expression, wearing elegant wrap dress and reading glasses, maternal figure, Pixar 3D style",
+      "seed": 42005,
+      "personality": "The wise aunty figure, gives unsolicited advice, secretly messy"
+    },
+    "Watermelon Wandi": {
+      "fruit": "watermelon",
+      "description": "anthropomorphic watermelon person, green striped exterior with hints of pink, tall imposing build, mysterious alluring expression, wearing trendy outfit, Pixar 3D style",
+      "seed": 42006,
+      "personality": "New arrival who causes chaos, everyone's attracted to them"
+    },
+    "Peach Palesa": {
+      "fruit": "peach",
+      "description": "anthropomorphic peach woman, soft fuzzy peach skin, rosy blush cheeks, sly calculating eyes, neat auburn leaf hair, wearing designer outfit, scheming posture, Pixar 3D style",
+      "seed": 42007,
+      "personality": "Sneaky strategist, plays both sides, master manipulator"
+    },
+    "Pineapple Pete": {
+      "fruit": "pineapple",
+      "description": "anthropomorphic pineapple man, golden-brown textured skin, tall spiky green crown hair, big goofy grin, round belly, wearing Hawaiian shirt, holding snack, Pixar 3D style",
+      "seed": 42008,
+      "personality": "The comic relief, always eating, drops hilarious one-liners"
+    }
+  }
+}

@@ -1,58 +1,130 @@
 {
-  "name": "Fruit Love Island - AI Episode Generator & Facebook Publisher",
+  "name": "Fruit Love Island - Full AI Video Pipeline",
   "nodes": [
     {
       "id": "trigger-1",
-      "name": "Episode Schedule (2x Daily)",
+      "name": "Episode Schedule (Daily 9AM)",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.3,
-      "position": [0, 400],
+      "position": [
+        0,
+        400
+      ],
       "parameters": {
         "rule": {
           "interval": [
             {
               "field": "hours",
-              "hoursInterval": 12
+              "triggerAtHour": 9
             }
           ]
         }
       }
     },
     {
-      "id": "ollama-story-1",
-      "name": "Generate Episode Script",
-      "type": "@n8n/n8n-nodes-langchain.ollama",
-      "typeVersion": 1,
-      "position": [300, 400],
+      "id": "trigger-webhook-1",
+      "name": "Manual Test (Webhook)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        200
+      ],
+      "webhookId": "fruit-love-island-test",
       "parameters": {
-        "resource": "text",
-        "operation": "message",
-        "modelId": {
-          "__rl": true,
-          "mode": "id",
-          "value": "mistral"
-        },
-        "messages": {
-          "values": [
+        "path": "fruit-love-island-test",
+        "httpMethod": "GET",
+        "responseMode": "lastNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "exec-read-queue-1",
+      "name": "Read Queue & Bible Files",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        300,
+        400
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const fs = require('fs');\nconst queuePath = '/home/node/queue.json';\nconst biblePath = '/home/node/character-bible.json';\n\nlet queue, bible;\ntry {\n  queue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));\n} catch (e) {\n  throw new Error('Failed to read queue.json: ' + e.message);\n}\ntry {\n  bible = JSON.parse(fs.readFileSync(biblePath, 'utf8'));\n} catch (e) {\n  throw new Error('Failed to read character-bible.json: ' + e.message);\n}\n\nconst nextEpisode = queue.episodes.find(ep => ep.status === 'pending');\nif (!nextEpisode) {\n  throw new Error('No pending episodes in queue');\n}\n\nreturn [{ json: { ...nextEpisode, characterBible: bible } }];"
+      }
+    },
+    {
+      "id": "code-parse-queue-1",
+      "name": "Parse Queue & Find Next Episode",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        600,
+        400
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const { execSync } = require('child_process');\nconst data = $input.first().json;\nfunction getEnv(name, fallback) {\n  try { return execSync('printenv ' + name, { encoding: 'utf8' }).trim() || fallback; }\n  catch(e) { return fallback; }\n}\nconst env = {\n  OLLAMA_MODEL: getEnv('OLLAMA_MODEL', 'mistral'),\n  KIE_AI_API_KEY: getEnv('KIE_AI_API_KEY', ''),\n  IMGBB_API_KEY: getEnv('IMGBB_API_KEY', ''),\n  POLLINATIONS_API_KEY: getEnv('POLLINATIONS_API_KEY', ''),\n  DISCORD_WEBHOOK_URL: getEnv('DISCORD_WEBHOOK_URL', ''),\n  FACEBOOK_PAGE_ID: getEnv('FACEBOOK_PAGE_ID', ''),\n  FACEBOOK_ACCESS_TOKEN: getEnv('FACEBOOK_ACCESS_TOKEN', '')\n};\nreturn [{ json: { ...data, env } }];"
+      }
+    },
+    {
+      "id": "exec-mkdir-1",
+      "name": "Create Episode Directory",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        900,
+        400
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const fs = require('fs');\nconst data = $input.first().json;\nconst workDir = '/tmp/episodes/episode_' + data.episode_number;\n\nif (!fs.existsSync(workDir)) {\n  fs.mkdirSync(workDir, { recursive: true });\n}\n\nreturn [{ json: { ...data, workDir: workDir } }];"
+      }
+    },
+    {
+      "id": "code-passthrough-1",
+      "name": "Carry Episode Data Forward",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        400
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const queueData = $('Parse Queue & Find Next Episode').first().json;\nreturn [{ json: queueData }];"
+      }
+    },
+    {
+      "id": "ollama-script-1",
+      "name": "Generate Episode Script",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1500,
+        400
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:11434/api/chat",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
             {
-              "role": "user",
-              "content": "Generate a brand new episode of Fruit Love Island. Make it dramatic, funny, and full of South African flavour. Surprise me with the storyline! Return ONLY valid JSON."
+              "name": "Content-Type",
+              "value": "application/json"
             }
           ]
         },
-        "simplify": true,
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: ($('Parse Queue & Find Next Episode').first().json.env.OLLAMA_MODEL), stream: false, format: 'json', options: { num_predict: 4096, num_ctx: 8192, temperature: 0.9 }, messages: [{ role: 'system', content: 'You are a scriptwriter for Fruit Love Island, an AI-animated reality dating show with anthropomorphic fruit characters set in South Africa. Output ONLY valid JSON with this exact structure: { \"episode_title\": \"string\", \"narrator_intro\": \"narrator voiceover intro for the episode (2-3 sentences)\", \"scenes\": [ { \"scene_number\": 1, \"location\": \"villa location\", \"characters\": [\"character names\"], \"visual_prompt\": \"detailed image generation prompt describing the scene visually\", \"narrator_vo\": \"narrator voiceover text for this scene (1-2 sentences)\", \"action\": \"what happens on screen in 1-2 sentences\", \"dialogue\": \"key dialogue line, max 15 words\", \"mood\": \"dramatic/funny/romantic/tense/shocking\", \"duration_seconds\": 5 }], \"cliffhanger\": \"dramatic ending line\", \"narrator_outro\": \"narrator closing voiceover (1-2 sentences)\" }. Write exactly 6 scenes. Characters: Banana Brad (smooth-talking player), Strawberry Sindi (drama queen from Durban), Apple Andile (nice guy, always friend-zoned), Mango Mpho (wildcard from Joburg), Grape Gloria (wise aunty, secretly messy), Watermelon Wandi (new arrival, causes chaos), Peach Palesa (sneaky strategist), Pineapple Pete (comic relief, always eating). Use South African slang: yoh, hayibo, eish, shame.' }, { role: 'user', content: 'Write Episode ' + $json.episode_number + ': Theme: ' + $json.theme + '. Viewer suggestions: ' + $json.viewer_suggestions }] }) }}",
         "options": {
-          "system": "You are a viral social media content creator specializing in short-form episodic drama for South African Facebook audiences.\n\nYou write \"Fruit Love Island\" — a reality TV parody where anthropomorphic fruit characters live in a luxurious villa, compete for love, form alliances, backstab, flirt, and create DRAMA.\n\nRECURRING CHARACTERS (use at least 3-4 per episode):\n- Banana Brad: Smooth-talking player, always flexing, thinks he's the main character\n- Strawberry Sindi: Gorgeous drama queen from Durban, uses \"hayibo\" every 5 seconds\n- Apple Andile: The nice guy who always gets friend-zoned, loyal to a fault\n- Mango Mpho: The wildcard from Joburg, unpredictable, drops bombshells\n- Grape Gloria: The wise aunty figure, gives unsolicited advice, secretly messy\n- Watermelon Wandi: New arrival who causes chaos, everyone's attracted to them\n- Peach Palesa: Sneaky strategist, plays both sides, master manipulator\n- Pineapple Pete: The comic relief, always eating, drops hilarious one-liners\n\nSTYLE REQUIREMENTS:\n- Heavy South African slang: \"yoh\", \"hayibo\", \"eish\", \"shame\", \"this one is forward\", \"it's giving messy\"\n- Reality TV drama: confessionals, shocking reveals, cliffhangers\n- Humor mixed with genuine emotion\n- Each episode builds on ongoing storylines\n\nOUTPUT FORMAT — Return ONLY valid JSON, no markdown, no explanation:\n{\n  \"episodeNumber\": <random 1-999>,\n  \"title\": \"<dramatic episode title>\",\n  \"recap\": \"<1 sentence Previously On recap>\",\n  \"scenes\": [\n    {\n      \"sceneNumber\": 1,\n      \"location\": \"<villa location: pool, kitchen, confession room, garden, hot tub, etc.>\",\n      \"characters\": [\"<character names>\"],\n      \"action\": \"<what happens in 1-2 sentences>\",\n      \"dialogue\": \"<key dialogue line for subtitles - max 15 words>\",\n      \"mood\": \"<dramatic/funny/romantic/tense/shocking>\",\n      \"imagePrompt\": \"Pixar-style 3D render, anthropomorphic [fruit] characters with expressive faces and human bodies, [location] in luxury Love Island villa, [mood] lighting, cinematic composition, colorful, dramatic\"\n    }\n  ],\n  \"cliffhanger\": \"<dramatic cliffhanger ending sentence>\",\n  \"nextEpisodeTeaser\": \"<1 sentence teaser for next episode>\"\n}\n\nGenerate exactly 6 scenes per episode. Make it DRAMATIC and ENTERTAINING.",
-          "num_predict": 4096,
-          "num_ctx": 8192,
-          "temperature": 0.9,
-          "format": "json"
-        }
-      },
-      "credentials": {
-        "ollamaApi": {
-          "id": "QWd9SzHgWsOiDEb2",
-          "name": "Ollama Local"
+          "timeout": 120000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
         }
       },
       "onError": "continueErrorOutput"
@@ -62,104 +134,574 @@
       "name": "Parse Episode & Extract Scenes",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [600, 400],
+      "position": [
+        1800,
+        400
+      ],
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "// Parse the episode JSON from Ollama response\nconst input = $input.first().json;\n\n// Extract the text content - handle different response shapes\nlet rawText = input.message || input.output || input.text || input.content || input.response || '';\nif (typeof rawText === 'object') rawText = JSON.stringify(rawText);\n\n// Clean markdown code fences if present\nrawText = rawText.replace(/^```json\\s*/i, '').replace(/```\\s*$/, '').trim();\n\nlet episode;\ntry {\n  episode = JSON.parse(rawText);\n} catch (e) {\n  // Try to extract JSON from the text\n  const match = rawText.match(/\\{[\\s\\S]*\\}/);\n  if (match) {\n    episode = JSON.parse(match[0]);\n  } else {\n    throw new Error('Could not parse episode JSON: ' + e.message + ' Raw: ' + rawText.slice(0, 200));\n  }\n}\n\n// Validate required fields\nif (!episode.scenes || !Array.isArray(episode.scenes)) {\n  throw new Error('Episode missing scenes array. Got: ' + JSON.stringify(episode).slice(0, 200));\n}\n\n// Output one item per scene, each carrying full episode context\nconst scenes = episode.scenes.map((scene, idx) => ({\n  json: {\n    episodeNumber: episode.episodeNumber || 1,\n    episodeTitle: episode.title || 'Untitled Episode',\n    recap: episode.recap || '',\n    cliffhanger: episode.cliffhanger || '',\n    nextEpisodeTeaser: episode.nextEpisodeTeaser || '',\n    totalScenes: episode.scenes.length,\n    sceneIndex: idx,\n    sceneNumber: scene.sceneNumber || (idx + 1),\n    location: scene.location || 'villa',\n    characters: scene.characters || [],\n    action: scene.action || '',\n    dialogue: scene.dialogue || '',\n    mood: scene.mood || 'dramatic',\n    imagePrompt: scene.imagePrompt || 'Pixar-style 3D render, anthropomorphic fruit characters in luxury villa, ' + (scene.mood || 'dramatic') + ' lighting, cinematic, colorful',\n    fullEpisode: episode\n  }\n}));\n\nreturn scenes;"
+        "jsCode": "const input = $input.first().json;\nconst queueData = $('Carry Episode Data Forward').first().json;\n\nlet rawText = '';\nif (input.message && input.message.content) {\n  rawText = input.message.content;\n} else if (typeof input === 'string') {\n  rawText = input;\n} else {\n  rawText = JSON.stringify(input);\n}\n\nrawText = rawText.replace(/^```json\\s*/i, '').replace(/```\\s*$/, '').trim();\n\nlet episode;\ntry {\n  episode = typeof rawText === 'object' ? rawText : JSON.parse(rawText);\n} catch (e) {\n  const match = rawText.match(/\\{[\\s\\S]*\\}/);\n  if (match) {\n    episode = JSON.parse(match[0]);\n  } else {\n    throw new Error('Could not parse episode JSON: ' + e.message + ' Raw: ' + rawText.slice(0, 300));\n  }\n}\n\nif (!episode.scenes || !Array.isArray(episode.scenes)) {\n  throw new Error('Episode missing scenes array');\n}\n\nconst narratorParts = [];\nif (episode.narrator_intro) narratorParts.push(episode.narrator_intro);\nepisode.scenes.forEach(s => {\n  if (s.narrator_vo) narratorParts.push(s.narrator_vo);\n});\nif (episode.narrator_outro) narratorParts.push(episode.narrator_outro);\nconst fullNarratorScript = narratorParts.join(' ... ');\n\nconst scenes = episode.scenes.map((scene, idx) => ({\n  json: {\n    episode_number: queueData.episode_number,\n    episode_title: episode.episode_title || 'Untitled Episode',\n    cliffhanger: episode.cliffhanger || '',\n    fullNarratorScript: fullNarratorScript,\n    totalScenes: episode.scenes.length,\n    sceneIndex: idx,\n    scene_number: scene.scene_number || (idx + 1),\n    location: scene.location || 'villa',\n    characters: scene.characters || [],\n    visual_prompt: scene.visual_prompt || scene.imagePrompt || '',\n    narrator_vo: scene.narrator_vo || '',\n    action: scene.action || '',\n    dialogue: scene.dialogue || '',\n    mood: scene.mood || 'dramatic',\n    duration_seconds: scene.duration_seconds || 5,\n    characterBible: queueData.characterBible || {},\n    workDir: '/tmp/episodes/episode_' + queueData.episode_number\n  }\n}));\n\nreturn scenes;"
       }
     },
     {
-      "id": "code-gen-images-1",
-      "name": "Generate Scene Images (Free API)",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [900, 400],
+      "id": "split-batch-1",
+      "name": "Process Scenes One by One",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        2100,
+        400
+      ],
       "parameters": {
-        "mode": "runOnceForEachItem",
-        "jsCode": "// Generate scene image URL - uses picsum.photos (reliable, free)\n// Each scene gets a unique random image based on scene index\nconst item = $input.item.json;\nconst seed = (item.sceneNumber || 1) * 100 + Math.floor(Math.random() * 99);\nconst imageUrl = 'https://picsum.photos/seed/' + seed + '/1024/1024';\n\nreturn {\n  json: {\n    ...item,\n    imageUrl: imageUrl\n  }\n};"
+        "batchSize": 1,
+        "options": {}
+      }
+    },
+    {
+      "id": "ollama-refine-1",
+      "name": "Refine Image Prompt",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2400,
+        400
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:11434/api/chat",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: ($('Parse Queue & Find Next Episode').first().json.env.OLLAMA_MODEL), stream: false, options: { num_predict: 512, temperature: 0.7 }, messages: [{ role: 'system', content: 'You refine image generation prompts for character consistency. Given a scene description and character descriptions, output ONLY a single optimized image prompt (no JSON, no labels). The prompt must include the exact character appearance details for every character in the scene. Always end with: Pixar-meets-reality-TV style, cinematic lighting, 9:16 vertical composition, high quality 3D render.' }, { role: 'user', content: 'Scene: ' + $json.visual_prompt + '\\n\\nCharacters in scene: ' + JSON.stringify($json.characters) + '\\n\\nCharacter Bible: ' + JSON.stringify(($json.characterBible || {}).characters || {}) + '\\n\\nMood: ' + $json.mood + ', Location: ' + $json.location }] }) }}",
+        "options": {
+          "timeout": 60000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
       },
       "onError": "continueErrorOutput"
     },
     {
-      "id": "code-aggregate-1",
-      "name": "Aggregate Scenes & Prepare Video",
+      "id": "code-prep-image-1",
+      "name": "Prepare Image Request",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1200, 400],
+      "position": [
+        2700,
+        400
+      ],
       "parameters": {
-        "mode": "runOnceForAllItems",
-        "jsCode": "// Collect all scene results with their image URLs\nconst items = $input.all();\nconst scenes = [];\nlet episodeData = null;\n\nfor (let i = 0; i < items.length; i++) {\n  const item = items[i].json;\n  \n  if (!episodeData && item.episodeTitle) {\n    episodeData = {\n      episodeNumber: item.episodeNumber,\n      title: item.episodeTitle,\n      recap: item.recap,\n      cliffhanger: item.cliffhanger,\n      nextEpisodeTeaser: item.nextEpisodeTeaser\n    };\n  }\n  \n  const imageUrl = item.imageUrl || '';\n  \n  scenes.push({\n    sceneNumber: item.sceneNumber || (i + 1),\n    dialogue: item.dialogue || 'Scene ' + (i + 1),\n    mood: item.mood || 'dramatic',\n    location: item.location || 'villa',\n    characters: item.characters || [],\n    action: item.action || '',\n    imageUrl: imageUrl,\n    imagePrompt: item.imagePrompt || ''\n  });\n}\n\nif (!episodeData) {\n  episodeData = { episodeNumber: 1, title: 'Fruit Love Island', recap: '', cliffhanger: '', nextEpisodeTeaser: '' };\n}\n\n// Build subtitle content (SRT format)\nlet srtContent = '';\nconst secondsPerScene = 5;\n\nscenes.forEach((scene, idx) => {\n  const startSec = idx * secondsPerScene;\n  const endSec = startSec + secondsPerScene;\n  const startTime = '00:00:' + String(startSec).padStart(2, '0') + ',000';\n  const endTime = '00:00:' + String(endSec).padStart(2, '0') + ',000';\n  srtContent += (idx + 1) + '\\n' + startTime + ' --> ' + endTime + '\\n' + scene.dialogue + '\\n\\n';\n});\n\n// Build image download + FFmpeg command (SRT written separately by Code node via fs)\nconst workDir = '/tmp/fruit-love-island';\nconst imageDownloads = scenes.map((s, i) => \n  s.imageUrl ? 'curl -sL \"' + s.imageUrl + '\" -o ' + workDir + '/scene_' + i + '.png' : 'echo \"No image for scene ' + i + '\"'\n).join(' && ');\n\nconst inputFiles = scenes.map((s, i) => \n  '-loop 1 -t ' + secondsPerScene + ' -i ' + workDir + '/scene_' + i + '.png'\n).join(' ');\n\nconst filterParts = scenes.map((s, i) => \n  '[' + i + ':v]scale=1024:1024,setsar=1[v' + i + ']'\n).join('; ');\n\nconst concatInputs = scenes.map((s, i) => '[v' + i + ']').join('');\nconst totalDuration = scenes.length * secondsPerScene;\n\nconst ffmpegCmd = 'ffmpeg -y ' + inputFiles + ' -filter_complex \"' + filterParts + '; ' + concatInputs + 'concat=n=' + scenes.length + ':v=1:a=0[outv]\" -map \"[outv]\" -c:v libx264 -pix_fmt yuv420p -r 24 -t ' + totalDuration + ' ' + workDir + '/episode.mp4';\n\n// Shell command: mkdir + download images + run ffmpeg (no SRT echo - written by next node via fs)\nconst fullCommand = 'mkdir -p ' + workDir + ' && ' + imageDownloads + ' && ' + ffmpegCmd;\n\nreturn [{\n  json: {\n    ...episodeData,\n    scenes: scenes,\n    srtContent: srtContent,\n    videoCommand: fullCommand,\n    videoPath: workDir + '/episode.mp4',\n    workDir: workDir,\n    totalDuration: totalDuration,\n    sceneCount: scenes.length\n  }\n}];"
+        "mode": "runOnceForEachItem",
+        "jsCode": "const item = $input.item.json;\nconst sceneData = $('Process Scenes One by One').first().json;\n\nlet refinedPrompt = '';\nif (item.message && item.message.content) {\n  refinedPrompt = item.message.content;\n} else {\n  refinedPrompt = sceneData.visual_prompt;\n}\n\nrefinedPrompt = refinedPrompt.replace(/```/g, '').replace(/^\\s*prompt:\\s*/i, '').trim();\n\nconst characters = sceneData.characters || [];\nconst bible = (sceneData.characterBible || {}).characters || {};\nlet seed = sceneData.scene_number * 1000;\nif (characters.length > 0 && bible[characters[0]]) {\n  seed = bible[characters[0]].seed || seed;\n}\n\nconst imageUrl = 'https://gen.pollinations.ai/prompt/' + encodeURIComponent(refinedPrompt) + '?width=1080&height=1920&nologo=true&seed=' + seed + '&model=flux';\n\nreturn {\n  json: {\n    ...sceneData,\n    refinedPrompt: refinedPrompt,\n    imageUrl: imageUrl,\n    imageSeed: seed\n  }\n};"
       }
     },
     {
-      "id": "exec-ffmpeg-1",
-      "name": "Create Video (FFmpeg)",
+      "id": "http-pollinations-image-1",
+      "name": "Generate Image (Pollinations)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        3000,
+        400
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.imageUrl }}",
+        "options": {
+          "timeout": 120000,
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "write-image-1",
+      "name": "Save Image to Disk",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1.1,
+      "position": [
+        3300,
+        400
+      ],
+      "parameters": {
+        "operation": "write",
+        "fileName": "={{ $('Prepare Image Request').first().json.workDir + '/scene_' + $('Prepare Image Request').first().json.scene_number + '.png' }}",
+        "dataPropertyName": "data",
+        "options": {}
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "code-after-image-1",
+      "name": "Prepare imgbb Upload",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1500, 400],
+      "position": [
+        3600,
+        400
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const sceneData = $('Prepare Image Request').first().json;\nconst binaryData = $input.item.binary;\nconst binaryKey = Object.keys(binaryData || {})[0];\nlet imageBase64 = '';\nif (binaryKey && binaryData[binaryKey]) {\n  imageBase64 = binaryData[binaryKey].data;\n}\n\nreturn {\n  json: {\n    ...sceneData,\n    imageBase64: imageBase64\n  }\n};"
+      }
+    },
+    {
+      "id": "http-imgbb-1",
+      "name": "Upload Image to imgbb",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        3900,
+        400
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.imgbb.com/1/upload",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "key",
+              "value": "={{ $('Parse Queue & Find Next Episode').first().json.env.IMGBB_API_KEY }}"
+            },
+            {
+              "name": "image",
+              "value": "={{ $json.imageBase64 }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "code-prep-kling-1",
+      "name": "Prepare Kling Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4200,
+        400
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const item = $input.item.json;\nconst sceneData = $('Prepare imgbb Upload').first().json;\n\nlet publicImageUrl = '';\nif (item.data && item.data.url) {\n  publicImageUrl = item.data.url;\n} else if (item.data && item.data.display_url) {\n  publicImageUrl = item.data.display_url;\n} else {\n  throw new Error('imgbb upload failed: ' + JSON.stringify(item).slice(0, 300));\n}\n\nreturn {\n  json: {\n    ...sceneData,\n    publicImageUrl: publicImageUrl\n  }\n};"
+      }
+    },
+    {
+      "id": "http-kling-submit-1",
+      "name": "Submit Kling Video Gen",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        4500,
+        400
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.kie.ai/api/v1/generate",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Parse Queue & Find Next Episode').first().json.env.KIE_AI_API_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'kling-2.6/image-to-video', input: { prompt: $json.action + ', smooth cinematic camera movement, natural motion, dramatic lighting', image_url: $json.publicImageUrl, duration: '5', aspect_ratio: '9:16' } }) }}",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "code-poll-setup-1",
+      "name": "Setup Polling State",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4800,
+        400
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const item = $input.item.json;\nconst sceneData = $('Prepare Kling Request').first().json;\n\nconst taskId = item.task_id || item.id || (item.data ? (item.data.task_id || item.data.id) : '') || '';\nif (!taskId) {\n  throw new Error('No task_id from Kling API: ' + JSON.stringify(item).slice(0, 300));\n}\n\nreturn {\n  json: {\n    ...sceneData,\n    klingTaskId: taskId,\n    pollRetries: 0,\n    maxRetries: 15\n  }\n};"
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "wait-poll-1",
+      "name": "Wait 60s Before Poll",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        5100,
+        400
+      ],
+      "parameters": {
+        "amount": 60,
+        "unit": "seconds"
+      }
+    },
+    {
+      "id": "http-kling-poll-1",
+      "name": "Check Kling Video Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        5400,
+        400
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.kie.ai/api/v1/tasks/{{ $json.klingTaskId }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Parse Queue & Find Next Episode').first().json.env.KIE_AI_API_KEY }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "code-poll-check-1",
+      "name": "Check Poll Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5700,
+        400
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const item = $input.item.json;\nconst prevData = $('Setup Polling State').first().json;\n\nconst status = item.status || (item.data ? item.data.status : '') || 'unknown';\nconst retries = (prevData.pollRetries || 0) + 1;\n\nif (status === 'completed' || status === 'succeed' || status === 'success') {\n  const videoUrl = (item.output ? item.output.video_url : '') || (item.data ? (item.data.output ? item.data.output.video_url : item.data.video_url) : '') || item.video_url || '';\n  return {\n    json: {\n      ...prevData,\n      klingStatus: 'completed',\n      videoUrl: videoUrl,\n      pollRetries: retries\n    }\n  };\n} else if (status === 'failed' || status === 'error') {\n  throw new Error('Kling video generation failed for scene ' + prevData.scene_number);\n} else if (retries >= (prevData.maxRetries || 15)) {\n  throw new Error('Kling polling timeout after ' + retries + ' retries for scene ' + prevData.scene_number);\n} else {\n  return {\n    json: {\n      ...prevData,\n      klingStatus: 'processing',\n      pollRetries: retries\n    }\n  };\n}"
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "if-poll-done-1",
+      "name": "Video Ready?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        6000,
+        400
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond1",
+              "leftValue": "={{ $json.klingStatus }}",
+              "rightValue": "completed",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "http-download-clip-1",
+      "name": "Download Video Clip",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        6300,
+        300
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.videoUrl }}",
+        "options": {
+          "timeout": 120000,
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "write-clip-1",
+      "name": "Save Video Clip to Disk",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1.1,
+      "position": [
+        6600,
+        300
+      ],
+      "parameters": {
+        "operation": "write",
+        "fileName": "={{ $('Prepare Kling Request').first().json.workDir + '/clip_' + $('Prepare Kling Request').first().json.scene_number + '.mp4' }}",
+        "dataPropertyName": "data",
+        "options": {}
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "wait-between-scenes-1",
+      "name": "Wait 10s Between Scenes",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        6900,
+        400
+      ],
+      "parameters": {
+        "amount": 10,
+        "unit": "seconds"
+      }
+    },
+    {
+      "id": "code-prep-voiceover-1",
+      "name": "Prepare Voiceover Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        7200,
+        400
+      ],
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "const { exec } = require('child_process');\nconst item = $input.first().json;\n\n// Write SRT via base64 decode (avoids shell escaping issues with quotes in dialogue)\nconst srtBase64 = Buffer.from(item.srtContent || '').toString('base64');\nconst writeSrt = 'echo ' + srtBase64 + ' | base64 -d > ' + (item.workDir || '/tmp/fruit-love-island') + '/subtitles.srt';\nconst cmd = writeSrt + ' && ' + item.videoCommand;\n\nreturn await new Promise((resolve, reject) => {\n  exec(cmd, { timeout: 300000, maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {\n    if (error) {\n      reject(new Error('FFmpeg failed: ' + (stderr || error.message).slice(-500)));\n    } else {\n      resolve([{ json: { ...item, videoCreated: true, ffmpegOutput: (stderr || stdout).slice(-300) } }]);\n    }\n  });\n});"
+        "jsCode": "const firstScene = $('Parse Episode & Extract Scenes').first().json;\nreturn [{\n  json: {\n    fullNarratorScript: firstScene.fullNarratorScript || 'Welcome to Fruit Love Island!',\n    episode_number: firstScene.episode_number,\n    episode_title: firstScene.episode_title,\n    cliffhanger: firstScene.cliffhanger || '',\n    workDir: firstScene.workDir,\n    totalScenes: firstScene.totalScenes\n  }\n}];"
+      }
+    },
+    {
+      "id": "http-voiceover-1",
+      "name": "Generate Voiceover (Pollinations)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        7500,
+        400
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://gen.pollinations.ai/v1/audio/speech",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Parse Queue & Find Next Episode').first().json.env.POLLINATIONS_API_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'tts-1', input: $json.fullNarratorScript, voice: 'nova' }) }}",
+        "options": {
+          "timeout": 120000,
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "write-voiceover-1",
+      "name": "Save Voiceover to Disk",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1.1,
+      "position": [
+        7800,
+        400
+      ],
+      "parameters": {
+        "operation": "write",
+        "fileName": "={{ $('Prepare Voiceover Request').first().json.workDir + '/voiceover.mp3' }}",
+        "dataPropertyName": "data",
+        "options": {}
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "exec-ffmpeg-1",
+      "name": "Assemble Final Video (FFmpeg)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        8100,
+        400
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const { execSync } = require('child_process');\nconst fs = require('fs');\nconst ep = $('Prepare Voiceover Request').first().json;\nconst workDir = ep.workDir;\nconst totalScenes = ep.totalScenes || 6;\n\n// Build concat file listing all scene clips\nlet concatContent = '';\nfor (let i = 1; i <= totalScenes; i++) {\n  const clipPath = workDir + '/clip_' + i + '.mp4';\n  if (fs.existsSync(clipPath)) {\n    concatContent += \"file '\" + clipPath + \"'\\n\";\n  }\n}\n\nconst concatFile = workDir + '/concat_list.txt';\nfs.writeFileSync(concatFile, concatContent);\n\nconst voiceover = workDir + '/voiceover.mp3';\nconst output = workDir + '/final_episode_' + ep.episode_number + '.mp4';\n\n// Concat clips, then mix voiceover audio\nif (fs.existsSync(voiceover)) {\n  execSync('ffmpeg -y -f concat -safe 0 -i ' + concatFile + ' -i ' + voiceover + ' -c:v copy -map 0:v:0 -map 1:a:0 -shortest ' + output, { timeout: 300000 });\n} else {\n  execSync('ffmpeg -y -f concat -safe 0 -i ' + concatFile + ' -c copy ' + output, { timeout: 300000 });\n}\n\nreturn [{ json: { status: 'ffmpeg_done', episode_number: ep.episode_number, episode_title: ep.episode_title, workDir: workDir, cliffhanger: ep.cliffhanger, videoPath: output } }];"
       },
       "onError": "continueErrorOutput"
     },
     {
       "id": "ollama-caption-1",
       "name": "Generate Facebook Caption",
-      "type": "@n8n/n8n-nodes-langchain.ollama",
-      "typeVersion": 1,
-      "position": [1800, 400],
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        8400,
+        400
+      ],
       "parameters": {
-        "resource": "text",
-        "operation": "message",
-        "modelId": {
-          "__rl": true,
-          "mode": "id",
-          "value": "mistral"
-        },
-        "messages": {
-          "values": [
+        "method": "POST",
+        "url": "http://host.docker.internal:11434/api/chat",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
             {
-              "role": "user",
-              "content": "={{ 'Write a Facebook caption for this Fruit Love Island episode:\\n\\nTitle: ' + $('Aggregate Scenes & Prepare Video').first().json.title + '\\nRecap: ' + $('Aggregate Scenes & Prepare Video').first().json.recap + '\\nCliffhanger: ' + $('Aggregate Scenes & Prepare Video').first().json.cliffhanger + '\\nScenes: ' + JSON.stringify(($('Aggregate Scenes & Prepare Video').first().json.scenes || []).map(function(s) { return s.dialogue; })) }}"
+              "name": "Content-Type",
+              "value": "application/json"
             }
           ]
         },
-        "simplify": true,
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: ($('Parse Queue & Find Next Episode').first().json.env.OLLAMA_MODEL), stream: false, options: { num_predict: 1024, temperature: 0.9 }, messages: [{ role: 'system', content: 'You write viral Facebook captions for Fruit Love Island \u00e2\u20ac\u201d a dramatic reality TV parody with anthropomorphic fruit characters, targeted at South African audiences. Style: Start with dramatic hook using South African slang (yoh, hayibo, eish). 2-3 lines of dramatic commentary. Use emojis. End with engagement hooks. Add 3-5 hashtags. Keep under 300 words. Output ONLY the caption text.' }, { role: 'user', content: 'Write a Facebook caption for Episode ' + $('Prepare Voiceover Request').first().json.episode_number + ': ' + ($('Prepare Voiceover Request').first().json.episode_title || '') + '. Cliffhanger: ' + ($('Prepare Voiceover Request').first().json.cliffhanger || '') }] }) }}",
         "options": {
-          "system": "You write viral Facebook captions for \"Fruit Love Island\" — a dramatic reality TV parody with anthropomorphic fruit characters, targeted at South African audiences.\n\nCAPTION STYLE:\n- Start with a dramatic hook (e.g., \"YOH this episode is HECTIC\" or \"Hayibo... who saw THAT coming?!\")\n- 2-3 lines of dramatic commentary about the episode\n- Use South African slang naturally\n- Include emojis (fire, crying, shocked, heart, etc.)\n- End with engagement hooks: \"Who's team are you on?\", \"Comment your fave character!\", \"Tag someone who's just like Banana Brad\"\n- Add 3-5 relevant hashtags: #FruitLoveIsland #SAMemes #DramaAlert etc.\n- Keep total caption under 300 words\n- Make it feel like a real person posting, not a brand\n\nOutput ONLY the caption text. No labels or explanations.",
-          "num_predict": 1024,
-          "temperature": 0.9
-        }
-      },
-      "credentials": {
-        "ollamaApi": {
-          "id": "QWd9SzHgWsOiDEb2",
-          "name": "Ollama Local"
+          "timeout": 60000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
         }
       },
       "onError": "continueErrorOutput"
     },
     {
-      "id": "code-prepare-upload-1",
+      "id": "code-prep-upload-1",
       "name": "Prepare Facebook Upload",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [2100, 400],
+      "position": [
+        8700,
+        400
+      ],
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "// Combine caption with video path for Facebook upload\nconst captionItem = $input.first().json;\nconst caption = captionItem.message || captionItem.output || captionItem.text || captionItem.content || captionItem.response || 'New episode of Fruit Love Island!';\n\n// Get episode data from previous nodes\nconst episodeData = $('Aggregate Scenes & Prepare Video').first().json;\n\nreturn [{\n  json: {\n    caption: caption,\n    videoPath: episodeData.videoPath || '/tmp/fruit-love-island/episode.mp4',\n    episodeTitle: episodeData.title || 'Fruit Love Island',\n    episodeNumber: episodeData.episodeNumber || 1,\n    sceneCount: episodeData.sceneCount || 6\n  }\n}];"
+        "jsCode": "const captionResponse = $input.first().json;\nconst epData = $('Prepare Voiceover Request').first().json;\n\nlet caption = 'New episode of Fruit Love Island!';\nif (captionResponse.message && captionResponse.message.content) {\n  caption = captionResponse.message.content;\n}\n\nreturn [{\n  json: {\n    caption: caption,\n    videoPath: epData.workDir + '/final_episode_' + epData.episode_number + '.mp4',\n    episode_number: epData.episode_number,\n    episode_title: epData.episode_title || 'Fruit Love Island',\n    workDir: epData.workDir\n  }\n}];"
       }
     },
     {
-      "id": "exec-upload-1",
+      "id": "exec-fb-upload-1",
       "name": "Upload Video to Facebook",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [2400, 400],
+      "position": [
+        9000,
+        400
+      ],
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "const { exec } = require('child_process');\nconst item = $input.first().json;\nconst videoPath = item.videoPath || '/tmp/fruit-love-island/episode.mp4';\nconst caption = item.caption || 'New Fruit Love Island episode!';\nconst cmd = 'curl -s -X POST \"https://graph-video.facebook.com/v21.0/YOUR_PAGE_ID/videos\" -F \"source=@' + videoPath + '\" -F \"description=' + encodeURIComponent(caption) + '\" -F \"access_token=YOUR_PAGE_ACCESS_TOKEN\"';\n\nreturn await new Promise((resolve, reject) => {\n  exec(cmd, { timeout: 120000, maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {\n    if (error) {\n      reject(new Error('Facebook upload failed: ' + (stderr || error.message).slice(-300)));\n    } else {\n      let result;\n      try { result = JSON.parse(stdout); } catch(e) { result = { raw: stdout }; }\n      resolve([{ json: { ...item, facebookResponse: result, uploaded: true } }]);\n    }\n  });\n});"
+        "jsCode": "const fs = require('fs');\nconst { execSync } = require('child_process');\nconst data = $input.first().json;\nconst envData = $('Parse Queue & Find Next Episode').first().json.env;\nconst pageId = envData.FACEBOOK_PAGE_ID;\nconst accessToken = envData.FACEBOOK_ACCESS_TOKEN;\n\nif (!pageId || !accessToken) {\n  throw new Error('Missing FACEBOOK_PAGE_ID or FACEBOOK_ACCESS_TOKEN env vars');\n}\n\nconst videoPath = data.videoPath;\nif (!videoPath || !fs.existsSync(videoPath)) {\n  throw new Error('Video file not found: ' + videoPath);\n}\n\n// Use curl for multipart video upload to Facebook Graph API\nconst caption = (data.caption || 'New Fruit Love Island episode!').replace(/'/g, \"'\\''\");\nconst curlCmd = \"curl -s -X POST \" +\n  \"'https://graph-video.facebook.com/v19.0/\" + pageId + \"/videos' \" +\n  \"-F 'access_token=\" + accessToken + \"' \" +\n  \"-F 'description=\" + caption + \"' \" +\n  \"-F 'title=\" + (data.episode_title || 'Fruit Love Island').replace(/'/g, \"'\\''\") + \"' \" +\n  \"-F 'source=@\" + videoPath + \"'\";\n\nconst result = execSync(curlCmd, { timeout: 300000 }).toString();\nlet fbResponse;\ntry {\n  fbResponse = JSON.parse(result);\n} catch (e) {\n  throw new Error('Facebook API returned invalid JSON: ' + result.slice(0, 500));\n}\n\nif (fbResponse.error) {\n  throw new Error('Facebook API error: ' + fbResponse.error.message);\n}\n\nreturn [{ json: { ...data, fbVideoId: fbResponse.id || '', fbResponse: fbResponse } }];"
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "exec-update-queue-1",
+      "name": "Update Episode Queue",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        9300,
+        400
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const fs = require('fs');\nconst epData = $('Prepare Facebook Upload').first().json;\nconst queuePath = '/home/node/queue.json';\n\ntry {\n  const queue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));\n  const ep = queue.episodes.find(e => e.episode_number === epData.episode_number);\n  if (ep) {\n    ep.status = 'published';\n    ep.published_at = new Date().toISOString();\n  }\n  fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2));\n} catch (e) {\n  // Non-fatal: log but don't block the pipeline\n}\n\nreturn [{ json: { status: 'published', episode_number: epData.episode_number, episode_title: epData.episode_title } }];"
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "http-discord-1",
+      "name": "Discord Notification",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        9600,
+        400
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Parse Queue & Find Next Episode').first().json.env.DISCORD_WEBHOOK_URL }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ content: 'Episode ' + $('Prepare Facebook Upload').first().json.episode_number + ' published! Title: ' + $('Prepare Facebook Upload').first().json.episode_title }) }}",
+        "options": {
+          "timeout": 10000
+        }
       },
       "onError": "continueErrorOutput"
     },
@@ -168,34 +710,74 @@
       "name": "Log Success",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
-      "position": [2700, 300],
+      "position": [
+        9900,
+        300
+      ],
       "parameters": {
         "mode": "manual",
         "assignments": {
           "assignments": [
-            {"id": "s1", "name": "status", "type": "string", "value": "success"},
-            {"id": "s2", "name": "episodeTitle", "type": "string", "value": "={{ $('Prepare Facebook Upload').first().json.episodeTitle }}"},
-            {"id": "s3", "name": "timestamp", "type": "string", "value": "={{ $now.toISO() }}"},
-            {"id": "s4", "name": "facebookResponse", "type": "string", "value": "={{ JSON.stringify($json) }}"}
+            {
+              "id": "s1",
+              "name": "status",
+              "type": "string",
+              "value": "success"
+            },
+            {
+              "id": "s2",
+              "name": "episode",
+              "type": "string",
+              "value": "={{ $('Prepare Facebook Upload').first().json.episode_title }}"
+            },
+            {
+              "id": "s3",
+              "name": "timestamp",
+              "type": "string",
+              "value": "={{ $now.toISO() }}"
+            }
           ]
         },
         "options": {}
       }
     },
     {
-      "id": "set-post-error-1",
-      "name": "Log Post/Video Error",
+      "id": "set-scene-error-1",
+      "name": "Log Scene Processing Error",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
-      "position": [2700, 600],
+      "position": [
+        6300,
+        700
+      ],
       "parameters": {
         "mode": "manual",
         "assignments": {
           "assignments": [
-            {"id": "e1", "name": "status", "type": "string", "value": "post_or_video_error"},
-            {"id": "e2", "name": "error", "type": "string", "value": "={{ typeof $json.error === 'string' ? $json.error : ($json.error ? $json.error.message : JSON.stringify($json)) }}"},
-            {"id": "e3", "name": "stage", "type": "string", "value": "video_creation_or_facebook_upload"},
-            {"id": "e4", "name": "timestamp", "type": "string", "value": "={{ $now.toISO() }}"}
+            {
+              "id": "e1",
+              "name": "status",
+              "type": "string",
+              "value": "scene_error"
+            },
+            {
+              "id": "e2",
+              "name": "error",
+              "type": "string",
+              "value": "={{ typeof $json.error === 'string' ? $json.error : ($json.error ? $json.error.message : JSON.stringify($json)) }}"
+            },
+            {
+              "id": "e3",
+              "name": "stage",
+              "type": "string",
+              "value": "image_or_video_generation"
+            },
+            {
+              "id": "e4",
+              "name": "timestamp",
+              "type": "string",
+              "value": "={{ $now.toISO() }}"
+            }
           ]
         },
         "options": {}
@@ -203,18 +785,83 @@
     },
     {
       "id": "set-script-error-1",
-      "name": "Log Script/Image Error",
+      "name": "Log Script Error",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
-      "position": [600, 700],
+      "position": [
+        1800,
+        700
+      ],
       "parameters": {
         "mode": "manual",
         "assignments": {
           "assignments": [
-            {"id": "f1", "name": "status", "type": "string", "value": "generation_error"},
-            {"id": "f2", "name": "error", "type": "string", "value": "={{ typeof $json.error === 'string' ? $json.error : ($json.error ? $json.error.message : JSON.stringify($json)) }}"},
-            {"id": "f3", "name": "stage", "type": "string", "value": "script_or_image_generation"},
-            {"id": "f4", "name": "timestamp", "type": "string", "value": "={{ $now.toISO() }}"}
+            {
+              "id": "f1",
+              "name": "status",
+              "type": "string",
+              "value": "script_error"
+            },
+            {
+              "id": "f2",
+              "name": "error",
+              "type": "string",
+              "value": "={{ typeof $json.error === 'string' ? $json.error : ($json.error ? $json.error.message : JSON.stringify($json)) }}"
+            },
+            {
+              "id": "f3",
+              "name": "stage",
+              "type": "string",
+              "value": "script_generation"
+            },
+            {
+              "id": "f4",
+              "name": "timestamp",
+              "type": "string",
+              "value": "={{ $now.toISO() }}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "set-post-error-1",
+      "name": "Log Upload/Assembly Error",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        9000,
+        700
+      ],
+      "parameters": {
+        "mode": "manual",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "g1",
+              "name": "status",
+              "type": "string",
+              "value": "upload_error"
+            },
+            {
+              "id": "g2",
+              "name": "error",
+              "type": "string",
+              "value": "={{ typeof $json.error === 'string' ? $json.error : ($json.error ? $json.error.message : JSON.stringify($json)) }}"
+            },
+            {
+              "id": "g3",
+              "name": "stage",
+              "type": "string",
+              "value": "assembly_or_facebook_upload"
+            },
+            {
+              "id": "g4",
+              "name": "timestamp",
+              "type": "string",
+              "value": "={{ $now.toISO() }}"
+            }
           ]
         },
         "options": {}
@@ -222,46 +869,511 @@
     }
   ],
   "connections": {
-    "Episode Schedule (2x Daily)": {
-      "main": [[{"node": "Generate Episode Script", "type": "main", "index": 0}]]
+    "Episode Schedule (Daily 9AM)": {
+      "main": [
+        [
+          {
+            "node": "Read Queue & Bible Files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Test (Webhook)": {
+      "main": [
+        [
+          {
+            "node": "Read Queue & Bible Files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Queue & Bible Files": {
+      "main": [
+        [
+          {
+            "node": "Parse Queue & Find Next Episode",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Queue & Find Next Episode": {
+      "main": [
+        [
+          {
+            "node": "Create Episode Directory",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Episode Directory": {
+      "main": [
+        [
+          {
+            "node": "Carry Episode Data Forward",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Carry Episode Data Forward": {
+      "main": [
+        [
+          {
+            "node": "Generate Episode Script",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Generate Episode Script": {
       "main": [
-        [{"node": "Parse Episode & Extract Scenes", "type": "main", "index": 0}],
-        [{"node": "Log Script/Image Error", "type": "main", "index": 0}]
+        [
+          {
+            "node": "Parse Episode & Extract Scenes",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Script Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Parse Episode & Extract Scenes": {
-      "main": [[{"node": "Generate Scene Images (Free API)", "type": "main", "index": 0}]]
-    },
-    "Generate Scene Images (Free API)": {
       "main": [
-        [{"node": "Aggregate Scenes & Prepare Video", "type": "main", "index": 0}],
-        [{"node": "Log Script/Image Error", "type": "main", "index": 0}]
+        [
+          {
+            "node": "Process Scenes One by One",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
-    "Aggregate Scenes & Prepare Video": {
-      "main": [[{"node": "Create Video (FFmpeg)", "type": "main", "index": 0}]]
-    },
-    "Create Video (FFmpeg)": {
+    "Process Scenes One by One": {
       "main": [
-        [{"node": "Generate Facebook Caption", "type": "main", "index": 0}],
-        [{"node": "Log Post/Video Error", "type": "main", "index": 0}]
+        [
+          {
+            "node": "Refine Image Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare Voiceover Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Refine Image Prompt": {
+      "main": [
+        [
+          {
+            "node": "Prepare Image Request",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare Image Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Image Request": {
+      "main": [
+        [
+          {
+            "node": "Generate Image (Pollinations)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Image (Pollinations)": {
+      "main": [
+        [
+          {
+            "node": "Save Image to Disk",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Scene Processing Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Image to Disk": {
+      "main": [
+        [
+          {
+            "node": "Prepare imgbb Upload",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Scene Processing Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare imgbb Upload": {
+      "main": [
+        [
+          {
+            "node": "Upload Image to imgbb",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload Image to imgbb": {
+      "main": [
+        [
+          {
+            "node": "Prepare Kling Request",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Scene Processing Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Kling Request": {
+      "main": [
+        [
+          {
+            "node": "Submit Kling Video Gen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Submit Kling Video Gen": {
+      "main": [
+        [
+          {
+            "node": "Setup Polling State",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Scene Processing Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Setup Polling State": {
+      "main": [
+        [
+          {
+            "node": "Wait 60s Before Poll",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Scene Processing Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 60s Before Poll": {
+      "main": [
+        [
+          {
+            "node": "Check Kling Video Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Kling Video Status": {
+      "main": [
+        [
+          {
+            "node": "Check Poll Result",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Scene Processing Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Poll Result": {
+      "main": [
+        [
+          {
+            "node": "Video Ready?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Scene Processing Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Video Ready?": {
+      "main": [
+        [
+          {
+            "node": "Download Video Clip",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait 60s Before Poll",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Video Clip": {
+      "main": [
+        [
+          {
+            "node": "Save Video Clip to Disk",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Scene Processing Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Video Clip to Disk": {
+      "main": [
+        [
+          {
+            "node": "Wait 10s Between Scenes",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Scene Processing Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 10s Between Scenes": {
+      "main": [
+        [
+          {
+            "node": "Process Scenes One by One",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Voiceover Request": {
+      "main": [
+        [
+          {
+            "node": "Generate Voiceover (Pollinations)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Voiceover (Pollinations)": {
+      "main": [
+        [
+          {
+            "node": "Save Voiceover to Disk",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Upload/Assembly Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Voiceover to Disk": {
+      "main": [
+        [
+          {
+            "node": "Assemble Final Video (FFmpeg)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Upload/Assembly Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Assemble Final Video (FFmpeg)": {
+      "main": [
+        [
+          {
+            "node": "Generate Facebook Caption",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Generate Facebook Caption": {
       "main": [
-        [{"node": "Prepare Facebook Upload", "type": "main", "index": 0}],
-        [{"node": "Log Post/Video Error", "type": "main", "index": 0}]
+        [
+          {
+            "node": "Prepare Facebook Upload",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Upload/Assembly Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Prepare Facebook Upload": {
-      "main": [[{"node": "Upload Video to Facebook", "type": "main", "index": 0}]]
+      "main": [
+        [
+          {
+            "node": "Upload Video to Facebook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Upload Video to Facebook": {
       "main": [
-        [{"node": "Log Success", "type": "main", "index": 0}],
-        [{"node": "Log Post/Video Error", "type": "main", "index": 0}]
+        [
+          {
+            "node": "Update Episode Queue",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Upload/Assembly Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Episode Queue": {
+      "main": [
+        [
+          {
+            "node": "Discord Notification",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Discord Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Discord Notification": {
+      "main": [
+        [
+          {
+            "node": "Log Success",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     }
   },
@@ -270,6 +1382,6 @@
     "saveDataErrorExecution": "all",
     "saveDataSuccessExecution": "all",
     "timezone": "Africa/Johannesburg",
-    "executionTimeout": 600
+    "executionTimeout": 1800
   }
 }

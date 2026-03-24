@@ -1,0 +1,34 @@
+{
+  "episodes": [
+    {
+      "episode_number": 21,
+      "theme": "New Bombshell Arrives",
+      "viewer_suggestions": "Bring in a pineapple character who stirs up drama",
+      "status": "pending"
+    },
+    {
+      "episode_number": 22,
+      "theme": "The Recoupling Ceremony",
+      "viewer_suggestions": "Grape Gloria should expose someone's secret",
+      "status": "pending"
+    },
+    {
+      "episode_number": 23,
+      "theme": "Casa Amor Twist",
+      "viewer_suggestions": "Banana Brad gets friend-zoned for once",
+      "status": "pending"
+    },
+    {
+      "episode_number": 24,
+      "theme": "The Lie Detector Challenge",
+      "viewer_suggestions": "Peach Palesa's double game gets exposed",
+      "status": "pending"
+    },
+    {
+      "episode_number": 25,
+      "theme": "Heartbreak and Healing",
+      "viewer_suggestions": "Apple Andile finally stands up for himself",
+      "status": "pending"
+    }
+  ]
+}
